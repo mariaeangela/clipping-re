@@ -270,7 +270,7 @@
           <button class="tag ${n.categoria}" data-acao="trocar">${n.categoria === 'malls' ? 'M&P' : 'HB'}</button>
           <span>${esc(n.fonteNome || 'manual')}</span>
           ${n.data ? `<span>· ${quando(n.data)}</span>` : ''}
-          ${n.viaGoogle ? '<span title="Link do Google Notícias; abra e troque pelo link do jornal se quiser">· link Google</span>' : ''}
+          ${/news\.google\./.test(n.url) ? '<span style="color:var(--accent)">· ⚠ link Google, troque no ✎</span>' : ''}
           ${usada ? '<span>· já enviada</span>' : ''}
         </div>
       </div>
@@ -351,6 +351,8 @@
           <button data-ord="tira" aria-label="Tirar">✕</button></li>`;
       });
     }
+    const google = sel.filter(n => /news\.google\./.test(n.url)).length;
+    if (google) html += `<li class="grupo" style="color:var(--accent)">⚠ ${google} link${google > 1 ? 's' : ''} do Google Notícias (não abre${google > 1 ? 'm' : ''} direto no WhatsApp). Toque no ✎ da notícia e cole o link do jornal.</li>`;
     $('ordem').innerHTML = html;
     atualizaTexto();
   }

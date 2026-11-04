@@ -43,10 +43,10 @@ const RE_PALAVRAS = new RegExp(
 // Palavras que puxam a notícia pra MALLS & PROPERTIES (o resto vai pra HOMEBUILDERS).
 const RE_MALLS = new RegExp('(^|[^a-z0-9])(' + [
   'shopping[a-z]*', 'malls?', 'galpo(es)?', 'galpao', 'logistic[a-z]*', 'escritorios?',
-  'lajes? corporativ[a-z]*', 'coworking', 'fundos? imobiliarios?', 'fiis?', 'varejo',
+  'lajes? corporativ[a-z]*', 'coworking', 'fundos? imobiliarios?', 'fiis?',
   'multiplan', 'iguatemi', 'allos', 'aliansce', 'brmalls', 'xp malls', 'hsi', 'log cp',
   'glp', 'prologis', 'syn', 'brookfield', 'kinea', 'abrasce', 'faria lima', 'corporativ[a-z]*',
-  'hote(l|is|leiro)', 'data ?centers?', 'lojas?', 'centros? comerci[a-z]*', 'kaml11',
+  'hote(l|is|leiro)', 'data ?centers?', 'centros? comerci[a-z]*', 'kaml11',
 ].join('|') + ')(?![a-z0-9])');
 
 // Fontes. `especializado: true` = tudo é do setor (não passa pelo filtro de palavras).
@@ -144,9 +144,12 @@ function ehDoSetor(titulo, resumo) {
   return RE_PALAVRAS.test(semAcento(titulo + ' ' + (resumo || '')));
 }
 
-function categoria(titulo, url, resumo) {
-  const t = semAcento(titulo + ' ' + (resumo || ''));
+// Decide só pela manchete: o resumo dos jornais traz assunto demais e puxava
+// notícia de construtora pra MALLS.
+function categoria(titulo, url) {
+  const t = semAcento(titulo);
   if (/metroquadrado\.com\/comercial\//.test(url)) return 'malls';
+  if (/metroquadrado\.com\/(residencial|cidades)\//.test(url)) return 'homebuilders';
   if (/siila\.com\.br/.test(url)) return RE_MALLS.test(t) || !/residenc|incorpora|construtora|imovel|imoveis/.test(t) ? 'malls' : 'homebuilders';
   return RE_MALLS.test(t) ? 'malls' : 'homebuilders';
 }
@@ -159,7 +162,11 @@ function data(s) {
 
 function urlLimpa(u) {
   try {
-    const x = new URL(decodeEntities(u).trim());
+    let s = decodeEntities(u).trim();
+    // A Folha embrulha o link no RSS: redir.folha.com.br/redir/.../*https://www1.folha...
+    const embrulhado = s.match(/\/\*(https?:\/\/.+)$/);
+    if (embrulhado) s = embrulhado[1];
+    const x = new URL(s);
     for (const k of [...x.searchParams.keys()]) if (/^utm_|^fbclid$|^gclid$/i.test(k)) x.searchParams.delete(k);
     x.hash = '';
     return x.toString();
@@ -337,7 +344,7 @@ async function coletaFonte(f, dias) {
       viaGoogle: !!i.viaGoogle,
       tituloDoLink: !!i.tituloDoLink,
       ordem: f.ordem ? f.ordem(i.url) : 0,
-      categoria: categoria(i.titulo, i.url, i.resumo),
+      categoria: categoria(i.titulo, i.url),
     });
   }
   relatorio.total = final.length;
@@ -369,6 +376,65 @@ function deduplica(itens) {
   return grupos;
 }
 
+// ----------------------------------------------------------------- Google
+
+// Os links do Google Notícias (news.google.com/rss/articles/CBMi…) não abrem
+// direto no WhatsApp. Aqui eles viram o link original do jornal: o código antigo
+// trazia a URL dentro do próprio id (base64); o novo exige perguntar ao Google
+// (página do artigo -> assinatura -> batchexecute).
+function idGoogle(url) {
+  const m = String(url).match(/news\.google\.com\/(?:rss\/)?articles\/([^?/#]+)/);
+  return m ? m[1] : '';
+}
+
+function urlNoId(id) {
+  try {
+    const bin = Buffer.from(id.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('latin1');
+    const m = bin.match(/https?:\/\/[\x21-\x7e]+/);
+    if (m && !/^AU_yqL/.test(bin.slice(4))) return m[0].replace(/[\x00-\x20]+.*$/, '');
+  } catch {}
+  return '';
+}
+
+async function urlViaGoogle(id) {
+  const pagina = await baixa('https://news.google.com/rss/articles/' + id);
+  const sg = (pagina.match(/data-n-a-sg="([^"]+)"/) || [])[1];
+  const ts = (pagina.match(/data-n-a-ts="([^"]+)"/) || [])[1];
+  if (!sg || !ts) throw new Error('sem assinatura');
+  const pedido = '["garturlreq",[["X","X",["X","X"],null,null,1,1,"US:en",null,1,null,null,null,null,null,0,1],"X","X",1,[1,1,1],1,1,null,0,0,null,0],"' + id + '",' + ts + ',"' + sg + '"]';
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), TIMEOUT_MS);
+  try {
+    const r = await fetch('https://news.google.com/_/DotsSplashUi/data/batchexecute', {
+      method: 'POST',
+      signal: ctl.signal,
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8', 'User-Agent': UA },
+      body: 'f.req=' + encodeURIComponent(JSON.stringify([[['Fbv4je', pedido, null, 'generic']]])),
+    });
+    const txt = await r.text();
+    const m = txt.match(/garturlres\\",\\"(https?:[^\\"]+)/);
+    if (!m) throw new Error('resposta sem link');
+    return JSON.parse('"' + m[1] + '"');
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function desembrulhaGoogle(itens) {
+  const fila = itens.filter(i => i.viaGoogle && idGoogle(i.url));
+  const prazo = Date.now() + 12000;  // não estoura o tempo da função na Vercel
+  const trabalha = async () => {
+    for (let i; Date.now() < prazo && (i = fila.shift());) {
+      const id = idGoogle(i.url);
+      let original = urlNoId(id);
+      if (!original) { try { original = await urlViaGoogle(id); } catch {} }
+      original = original && urlLimpa(original);
+      if (original && !/news\.google\./.test(original)) { i.url = original; i.viaGoogle = false; }
+    }
+  };
+  await Promise.all(Array.from({ length: 6 }, trabalha));
+}
+
 async function coletaTudo(dias) {
   const resultados = await Promise.all(FONTES.map(f => coletaFonte(f, dias).catch(e => ({
     itens: [], relatorio: { nome: f.nome, via: [], erros: [String(e && e.message || e)], total: 0 },
@@ -376,6 +442,8 @@ async function coletaTudo(dias) {
   const fontes = {};
   let itens = [];
   FONTES.forEach((f, k) => { fontes[f.id] = resultados[k].relatorio; itens.push(...resultados[k].itens); });
+  itens = deduplica(itens);
+  await desembrulhaGoogle(itens);
   itens = deduplica(itens);
   itens.sort((a, b) => {
     const da = a.data ? Date.parse(a.data) : 0, db = b.data ? Date.parse(b.data) : 0;
@@ -401,4 +469,4 @@ async function handler(req, res) {
 }
 
 module.exports = handler;
-module.exports._interno = { lerFeed, lerSitemap, lerHtml, lerUrlsSoltas, ehDoSetor, categoria, deduplica, FONTES };
+module.exports._interno = { urlLimpa, urlNoId, idGoogle, lerFeed, lerSitemap, lerHtml, lerUrlsSoltas, ehDoSetor, categoria, deduplica, FONTES };
