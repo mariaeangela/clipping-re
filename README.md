@@ -21,7 +21,12 @@ Repositório e projeto na Vercel próprios, sem nada do Diagonal.
 
 ## Ajustes comuns
 - Faltou um jornal ou um link mudou: lista `FONTES` em `api/noticias.js`.
-- Palavras que decidem o que é do setor: `PALAVRAS`; o que vai para
-  MALLS & PROPERTIES: `RE_MALLS`.
+- O que é do setor: `TERMOS` (pontos por termo, montados a partir de ~1.100
+  notícias que já saíram no clipping). O que vai para MALLS & PROPERTIES:
+  `RE_MALLS`; incorporadoras sempre em HOMEBUILDERS: `RE_HOMEBUILDERS`.
+- Patrocinados (Dino, Pressworks, Estúdio Folha…) nunca entram: `PATROCINADO`.
+- Na tela, a lista padrão é “Novas desde o último clipping”; as de pontuação
+  baixa ficam em “+ N menos prováveis”. O app aprende com cada envio: palavras
+  das notícias escolhidas sobem, das que ficaram de fora descem.
 - Na tela, “Diagnóstico das fontes” (no fim da lista) mostra quantas notícias
   vieram de cada jornal e qual endereço falhou.

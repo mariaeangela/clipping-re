@@ -68,6 +68,11 @@
 
   .vazio, .aviso { text-align: center; color: var(--muted); padding: 32px 12px; }
   .aviso { padding: 12px; font-size: 13px; background: var(--card); border: 1px dashed var(--line); border-radius: 12px; text-align: left; margin-top: 12px; }
+  details.talvez { margin: 4px 0 8px; }
+  details.talvez > summary { cursor: pointer; color: var(--muted); font-size: 13px; padding: 8px 4px; list-style: none; }
+  details.talvez > summary::-webkit-details-marker { display: none; }
+  details.talvez[open] > summary { color: var(--ink); }
+  details.talvez .item { opacity: .85; }
   details.diag { margin: 24px 0 8px; font-size: 12px; color: var(--muted); }
   details.diag summary { cursor: pointer; }
   details.diag li { margin: 4px 0; word-break: break-all; }
@@ -186,18 +191,21 @@
   function carrega() {
     try { return JSON.parse(localStorage.getItem(CHAVE)) || {}; } catch { return {}; }
   }
-  const mem = Object.assign({ selecao: [], dia: hoje(), manuais: [], edicoes: {}, enviadas: {}, mes: 'pt', ocultas: {} }, carrega());
+  const mem = Object.assign({ selecao: [], dia: hoje(), manuais: [], edicoes: {}, enviadas: {}, mes: 'pt', ocultas: {},
+    visto: {}, ultimoEnvio: 0, pos: {}, neg: {}, licao: null }, carrega());
   // Virou o dia: a seleção começa do zero (as enviadas ficam marcadas por 10 dias).
   if (mem.dia !== hoje()) { mem.selecao = []; mem.dia = hoje(); mem.relTitulo = ''; mem.relLink = ''; }
   const limiteEnviadas = Date.now() - 10 * 864e5;
   for (const [u, t] of Object.entries(mem.enviadas)) if (t < limiteEnviadas) delete mem.enviadas[u];
+  for (const [id, t] of Object.entries(mem.visto)) if (t < limiteEnviadas) delete mem.visto[id];
   function salva() { try { localStorage.setItem(CHAVE, JSON.stringify(mem)); } catch {} }
 
   // ---------------------------------------------------------------- estado
   let noticias = [];          // vindas do servidor
   let fontes = {};            // diagnóstico por jornal
   let filtroFonte = 'todas';
-  let filtroExtra = 'todas';  // todas | novas | homebuilders | malls
+  let filtroExtra = 'novas';  // novas | todas | homebuilders | malls
+  const abertos = new Set();  // seções com os "menos prováveis" abertos
   let carregando = false;
   let editando = null;        // id do item no painel de edição
 
@@ -220,6 +228,10 @@
       const j = await r.json();
       noticias = j.itens || [];
       fontes = j.fontes || {};
+      // Notícia sem data (veio da página do site): conta a partir de quando apareceu aqui.
+      const agora = Date.now();
+      noticias.forEach(n => { if (!mem.visto[n.id]) mem.visto[n.id] = agora; });
+      salva();
       try { localStorage.setItem(CHAVE + '_cache', JSON.stringify(j)); } catch {}
       $('sub').textContent = 'atualizado às ' + new Date(j.geradoEm).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
     } catch (e) {
@@ -255,8 +267,51 @@
     Object.keys(cont).forEach(n => { if (!nomes.includes(n)) nomes.push(n); });
     $('chipsFonte').innerHTML = [['todas', 'Todos', lista.length], ...nomes.map(n => [n, n, cont[n] || 0])]
       .map(([v, r, c]) => `<button class="chip" data-fonte="${esc(v)}" aria-pressed="${filtroFonte === v}">${esc(r)}<span class="n">${c}</span></button>`).join('');
-    const extras = [['todas', 'Tudo'], ['novas', 'Não enviadas'], ['homebuilders', 'Homebuilders'], ['malls', 'Malls & Properties']];
+    const extras = [['novas', 'Novas desde o último clipping'], ['todas', 'Tudo (2 dias)'], ['homebuilders', 'Homebuilders'], ['malls', 'Malls & Properties']];
     $('chipsFiltro').innerHTML = extras.map(([v, r]) => `<button class="chip" data-extra="${v}" aria-pressed="${filtroExtra === v}">${r}</button>`).join('');
+  }
+
+  // ---------------------------------------------------------------- relevância
+  // O servidor manda `pontos` (0–9) pela manchete. Aqui soma o que o app aprendeu
+  // com ela: palavras das notícias que ela manda sobem, das que ela deixa passar descem.
+  const RELEVANTE = 3;
+  const PARADAS = new Set('para com sobre como mais apos entre pela pelo pelos pelas sem quer diz entao ainda mesmo esta este essa esse isso onde quando porque pode deve novo nova novos novas anos tambem seus suas dele dela qual quem tudo todo toda depois antes contra veja entenda'.split(' '));
+  function palavras(t) {
+    const base = String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    return [...new Set((base.match(/[a-z0-9]{4,}/g) || []).filter(w => !PARADAS.has(w)))];
+  }
+  function bonus(n) {
+    let b = 0;
+    for (const w of palavras(n.titulo)) {
+      const p = mem.pos[w] || 0, q = mem.neg[w] || 0;
+      if (p + q >= 2) b += 0.7 * Math.log((p + 1) / (q + 1));
+    }
+    return Math.max(-3, Math.min(3, b));
+  }
+  const nota = n => (n.manual ? 9 : (n.pontos ?? RELEVANTE)) + bonus(n);
+  const quandoChegou = n => (n.data ? Date.parse(n.data) : mem.visto[n.id] || Date.now());
+  function ehNova(n) {
+    if (mem.enviadas[n.url]) return false;
+    if (!mem.ultimoEnvio) return quandoChegou(n) >= Date.now() - 30 * 3600e3;
+    // Já estava na lista quando ela mandou o último clipping = ela deixou passar.
+    if ((mem.visto[n.id] || 0) <= mem.ultimoEnvio) return false;
+    // Apareceu depois do envio: entra se for das últimas 24h antes dele (atrasadas contam).
+    return quandoChegou(n) >= mem.ultimoEnvio - 24 * 3600e3;
+  }
+
+  // Ao mandar o clipping: o que foi escolhido ensina "sim", o resto da lista de novas
+  // ensina "não". Se mandar de novo no mesmo dia, desfaz a lição anterior antes.
+  function aprende(escolhidas, candidatas) {
+    const soma = (alvo, lista, sinal) => lista.forEach(t => palavras(t).forEach(w => {
+      alvo[w] = (alvo[w] || 0) + sinal;
+      if (alvo[w] <= 0) delete alvo[w];
+    }));
+    if (mem.licao && mem.licao.dia === hoje()) { soma(mem.pos, mem.licao.sim, -1); soma(mem.neg, mem.licao.nao, -1); }
+    const sim = escolhidas.map(n => n.titulo);
+    const ids = new Set(escolhidas.map(n => n.id));
+    const nao = candidatas.filter(n => !ids.has(n.id) && !n.manual).map(n => n.titulo);
+    soma(mem.pos, sim, 1); soma(mem.neg, nao, 1);
+    mem.licao = { dia: hoje(), sim, nao };
   }
 
   function cartao(n) {
@@ -286,17 +341,24 @@
     desenhaChips(lista);
     const vis = lista.filter(n =>
       (filtroFonte === 'todas' || n.fonteNome === filtroFonte) &&
-      (filtroExtra === 'todas' || (filtroExtra === 'novas' ? !mem.enviadas[n.url] : n.categoria === filtroExtra)));
+      (mem.selecao.includes(n.id) || filtroExtra === 'todas' || (filtroExtra === 'novas' ? ehNova(n) : n.categoria === filtroExtra)));
 
     let html = '';
     if (!vis.length) {
-      html = `<div class="vazio">${carregando ? 'Buscando…' : 'Nenhuma notícia por aqui.'}</div>`;
+      html = `<div class="vazio">${carregando ? 'Buscando…' : filtroExtra === 'novas' && lista.length
+        ? 'Nada novo desde o último clipping. Veja em “Tudo (2 dias)”.' : 'Nenhuma notícia por aqui.'}</div>`;
     } else {
       for (const cat of Object.keys(SECOES)) {
         const g = vis.filter(n => n.categoria === cat);
         if (!g.length) continue;
-        html += `<div class="secao"><h2>${SECOES[cat]}</h2><div class="linha"></div><span class="n">${g.length}</span></div>`;
-        html += g.map(cartao).join('');
+        const fortes = g.filter(n => nota(n) >= RELEVANTE || mem.selecao.includes(n.id))
+          .sort((a, b) => quandoChegou(b) - quandoChegou(a));
+        const fracas = g.filter(n => !fortes.includes(n)).sort((a, b) => nota(b) - nota(a));
+        html += `<div class="secao"><h2>${SECOES[cat]}</h2><div class="linha"></div><span class="n">${fortes.length}</span></div>`;
+        html += fortes.map(cartao).join('');
+        if (fracas.length) {
+          html += `<details class="talvez" data-cat="${cat}"${abertos.has(cat) ? ' open' : ''}><summary>+ ${fracas.length} menos prováve${fracas.length > 1 ? 'is' : 'l'}</summary>${fracas.map(cartao).join('')}</details>`;
+        }
       }
     }
     html += `<button class="add" id="btnAdd">+ Adicionar notícia com link</button>`;
@@ -365,7 +427,12 @@
 
   function marcaEnviadas() {
     const agora = Date.now();
-    selecionadas().forEach(n => { mem.enviadas[n.url] = agora; });
+    const sel = selecionadas();
+    // Lição só uma vez por envio (Copiar e WhatsApp contam como o mesmo envio).
+    const candidatas = todos().filter(n => ehNova(n) || mem.enviadas[n.url] === mem.ultimoEnvio);
+    if (!mem.licao || mem.licao.dia !== hoje() || mem.ultimoEnvio < agora - 10 * 60e3) aprende(sel, candidatas);
+    sel.forEach(n => { mem.enviadas[n.url] = agora; });
+    mem.ultimoEnvio = agora;
     salva();
   }
 
@@ -387,6 +454,12 @@
   document.addEventListener('click', e => {
     const chipF = e.target.closest('[data-fonte]');
     if (chipF) { filtroFonte = chipF.dataset.fonte; desenha(); return; }
+    const resumo = e.target.closest('details.talvez > summary');
+    if (resumo) {
+      const cat = resumo.parentElement.dataset.cat;
+      setTimeout(() => { resumo.parentElement.open ? abertos.add(cat) : abertos.delete(cat); });
+      return;
+    }
     const chipX = e.target.closest('[data-extra]');
     if (chipX) { filtroExtra = chipX.dataset.extra; desenha(); return; }
     if (e.target.closest('[data-fecha]') || e.target.classList.contains('folha')) {

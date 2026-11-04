@@ -10,43 +10,77 @@
 // o app nunca fica em branco por causa de um site só.
 //
 // Jornais especializados (Metro Quadrado, Siila) entram inteiros; nos jornais
-// gerais (Folha, Estadão, Valor, O Globo) só entram as manchetes que batem com
-// as palavras do setor (imóveis, FGTS, incorporadora, shopping...).
+// gerais (Folha, Estadão, Valor, O Globo) só entram as manchetes com pontuação
+// do setor (ver TERMOS). Cada notícia volta com `pontos` pro app ordenar.
 
 const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
 const TIMEOUT_MS = 8000;
 
-// Palavras do setor. Comparação sem acento e em minúsculas, por palavra inteira
-// (o "*" no fim aceita continuação: "imove*" pega imóvel, imóveis...).
-const PALAVRAS = [
-  'imove*', 'imobiliari*', 'fgts', 'construtora*', 'incorporador*', 'incorporac*',
-  'shopping*', 'mall*', 'minha casa minha vida', 'mcmv', 'aluguel', 'alugue*', 'locac*',
-  'galpao', 'galpoes', 'logistico*', 'lajes corporativas', 'escritorios', 'coworking',
-  'fundo imobiliario', 'fundos imobiliarios', 'fii', 'fiis', 'loteament*', 'condominio*',
-  'residencia*', 'habitac*', 'moradia*', 'retrofit', 'metro quadrado', 'm2', 'm²',
-  'credito imobiliario', 'financiamento imobiliario', 'sbpe', 'construcao civil',
-  'terreno*', 'plano diretor', 'zoneamento', 'verticaliz*', 'apartamento*', 'cri',
-  'cyrela', 'mrv', 'cury', 'direcional', 'tenda', 'eztec', 'gafisa', 'moura dubeux', 'lavvi',
-  'mitre', 'trisul', 'helbor', 'melnick', 'plano&plano', 'plano e plano', 'jhsf', 'tecnisa',
-  'even construtora', 'pdg', 'rni', 'vitacon', 'multiplan', 'iguatemi', 'allos', 'aliansce',
-  'brmalls', 'xp malls', 'hsi', 'log cp', 'log commercial', 'glp', 'prologis', 'syn', 'cbre',
-  'jll', 'brookfield', 'patria', 'kinea', 'secovi', 'abrainc', 'cbic', 'abrasce',
+// Pontuação de relevância da manchete. Montada a partir de ~1.100 notícias
+// que já entraram no clipping (abr–nov/2026): cada termo soma pontos e a
+// notícia é "do setor" com RELEVANTE pontos ou mais; com TALVEZ pontos ela
+// aparece no app numa lista à parte ("menos prováveis").
+// Os padrões rodam sobre o texto sem acento e em minúsculas.
+const RELEVANTE = 3;
+const TALVEZ = 2;
+const TERMOS = [
+  // 3: sozinho já garante que é do setor
+  [3, 'imobiliari[ao]s?', 'imove(l|is)', 'incorporador[ae]s?', 'incorporac(ao|oes)', 'construtoras?',
+    'fgts', 'mcmv', 'minha casa,? minha vida', 'shoppings?', 'galp(ao|oes)', 'escritorios?',
+    'lajes? corporativ[a-z]*', 'fundos? imobiliarios?', 'fiis?', '[a-z]{4}11', 'alugue(l|is)',
+    'locac(ao|oes)', 'locatari[a-z]*', 'inquilin[a-z]*', 'retrofit', 'multifamily', 'built to rent',
+    'real estate', 'vacancia', 'zoneamento', 'plano diretor', 'condominios?', 'apartamentos?',
+    'empreendimentos?', 'loteament[a-z]*', 'habitac[a-z]*', 'moradias?', 'casa propria', 'alto padrao',
+    'itbi', 'iptu', 'alienacao fiduciaria', 'distratos?', 'sbpe', 'airbnb', 'short stay', 'data ?centers?',
+    'centros? de distribuicao', 'last mile', 'cap rate', 'metro quadrado', 'm2', 'm²', 'incc', 'fipe ?zap',
+    // empresas e entidades do setor
+    'cyrela', 'mrv', 'cury', 'direcional', 'tenda', 'eztec', 'gafisa', 'moura dubeux', 'lavvi', 'mitre',
+    'trisul', 'helbor', 'melnick', 'plano ?(&|e) ?plano', 'jhsf', 'tecnisa', 'even', 'pdg', 'rni', 'rossi',
+    'vitacon', 'patrimar', 'tegra', 'vitale', 'setin', 'kallas', 'you,? inc', 'lindenberg', 'multiplan',
+    'iguatemi', 'allos', 'aliansce', 'brmalls', 'xp malls', 'hsi', 'log cp', 'log commercial', 'glp',
+    'prologis', 'goodman', 'hbr realty', 'syn', 'brookfield', 'patria', 'kinea', 'tishman', 'cushman',
+    'jll', 'cbre', 'colliers', 'newmark', 'siila', 'secovi', 'abrainc', 'cbic', 'abrasce', 'sinduscon',
+    'quintoandar', 'loft', 'gav'],
+  // 2: muito comum no clipping, mas também aparece fora do setor
+  [2, 'predios?', 'lancamentos?', 'estudios?', 'studios?', 'construc(ao|oes)', 'obras?', 'canteiros?',
+    'faria lima', 'itaim', 'vila olimpia', 'pinheiros', 'berrini', 'jardins', 'leblon', 'ipanema',
+    'barra da tijuca', 'corporativ[a-z]*', 'logistic[a-z]*', 'hote(l|is)', 'hoteleir[a-z]*', 'resorts?',
+    'terrenos?', 'bairros?', 'ultraluxo', 'luxo', 'mans(ao|oes)', 'coberturas?', 'arranha-?ceus?',
+    'leil(ao|oes)', 'urbanis[a-z]*', 'adensa[a-z]*', 'campo de marte', 'verticaliz[a-z]*', 'residenc[a-z]*',
+    'casas', 'cimento', 'mao de obra', 'propriedades?', 'ativos? reais', 'cris?', 'lcis?', 'poupanca',
+    'estoques?', 'unidades', 'torres?', 'fasano', 'senior living', 'compradores?'],
+  // 1: só conta junto com outro termo
+  [1, 'caixa', 'juros', 'selic', 'reforma tributaria', 'prefeitura', 'metro', 'greve', 'vendas',
+    'sede', 'vizinh[a-z]*', 'patrimonio', 'cidades?', 'centro', 'familias', 'renda', 'credito', 'financiamentos?'],
 ];
+const TERMOS_RE = TERMOS.flatMap(([peso, ...pads]) =>
+  pads.map(p => [peso, new RegExp('(?:^|[^a-z0-9])(?:' + p + ')(?![a-z0-9])')]));
 
-const RE_PALAVRAS = new RegExp(
-  '(^|[^a-z0-9])(' + PALAVRAS.map(p => {
-    const base = semAcento(p).replace(/[.*+?^${}()|[\]\\]/g, m => (m === '*' ? m : '\\' + m));
-    return base.endsWith('*') ? base.slice(0, -1) + '[a-z]*' : base;
-  }).join('|') + ')(?![a-z0-9])'
-);
+function pontua(titulo) {
+  const t = semAcento(titulo).replace(/[‘’'"“”]/g, ' ');
+  let pontos = 0;
+  for (const [peso, re] of TERMOS_RE) if (re.test(t)) pontos += peso;
+  return Math.min(pontos, 9);
+}
 
 // Palavras que puxam a notícia pra MALLS & PROPERTIES (o resto vai pra HOMEBUILDERS).
 const RE_MALLS = new RegExp('(^|[^a-z0-9])(' + [
   'shopping[a-z]*', 'malls?', 'galpo(es)?', 'galpao', 'logistic[a-z]*', 'escritorios?',
-  'lajes? corporativ[a-z]*', 'coworking', 'fundos? imobiliarios?', 'fiis?',
+  'lajes? corporativ[a-z]*', 'coworking', 'fundos? imobiliarios?', 'fiis?', '[a-z]{4}11',
   'multiplan', 'iguatemi', 'allos', 'aliansce', 'brmalls', 'xp malls', 'hsi', 'log cp',
-  'glp', 'prologis', 'syn', 'brookfield', 'kinea', 'abrasce', 'faria lima', 'corporativ[a-z]*',
-  'hote(l|is|leiro)', 'data ?centers?', 'centros? comerci[a-z]*', 'kaml11',
+  'glp', 'prologis', 'goodman', 'syn', 'brookfield', 'kinea', 'patria', 'abrasce', 'faria lima', 'corporativ[a-z]*',
+  'hote(l|is|leiro)', 'data ?centers?', 'centros? comerci[a-z]*', 'centros? de distribuicao',
+  'last mile', 'vacancia', 'e-?commerce', 'varejistas?', 'torres?', 'sede', 'cap rate', 'cris?',
+  'lojas?', 'comercia(l|is)', 'hotelaria', 'jhsf', 'multifamily', 'fasano', 'trx[a-z0-9]*', 'vinci',
+  'hbr', 'jll', 'ativos? imobiliarios?', 'inquilin[a-z]*', 'arenas?', 'renda recorrente',
+].join('|') + ')(?![a-z0-9])');
+
+// Incorporadoras: notícia delas vai pra HOMEBUILDERS mesmo falando de galpão ou hotel.
+const RE_HOMEBUILDERS = new RegExp('(^|[^a-z0-9])(' + [
+  'cyrela', 'mrv', 'cury', 'direcional', 'tenda', 'eztec', 'gafisa', 'moura dubeux', 'lavvi', 'mitre',
+  'trisul', 'helbor', 'melnick', 'plano ?(&|e) ?plano', 'tecnisa', 'even', 'pdg', 'rni', 'rossi',
+  'vitacon', 'patrimar', 'tegra', 'vitale', 'setin', 'kallas', 'you,? inc', 'lindenberg', 'incorporador[a-z]*',
+  'mcmv', 'minha casa,? minha vida', 'fgts',
 ].join('|') + ')(?![a-z0-9])');
 
 // Fontes. `especializado: true` = tudo é do setor (não passa pelo filtro de palavras).
@@ -55,7 +89,7 @@ const FONTES = [
     id: 'metroquadrado', nome: 'Metro Quadrado', dominio: 'metroquadrado.com', especializado: true,
     rss: ['https://metroquadrado.com/feed', 'https://metroquadrado.com/rss', 'https://metroquadrado.com/rss.xml', 'https://metroquadrado.com/feed.xml'],
     sitemap: ['https://metroquadrado.com/sitemap-news.xml', 'https://metroquadrado.com/news-sitemap.xml'],
-    html: ['https://metroquadrado.com/', 'https://metroquadrado.com/residencial', 'https://metroquadrado.com/comercial', 'https://metroquadrado.com/cidades'],
+    html: ['https://metroquadrado.com/', 'https://metroquadrado.com/residencial', 'https://metroquadrado.com/comercial', 'https://metroquadrado.com/cidades', 'https://metroquadrado.com/investimentos'],
     linkOk: /^https?:\/\/(www\.)?metroquadrado\.com\/[a-z0-9-]+\/[a-z0-9-]{12,}\/?$/i,
   },
   {
@@ -75,6 +109,9 @@ const FONTES = [
       'https://feeds.folha.uol.com.br/cotidiano/rss091.xml',
       'https://c-level.folha.uol.com.br/feed/',
     ],
+    // Páginas que o RSS não cobre (Painel S.A. é de onde saem muitas notas do setor).
+    htmlSempre: ['https://www1.folha.uol.com.br/colunas/painelsa/', 'https://www1.folha.uol.com.br/mercado/', 'https://c-level.folha.uol.com.br/negocios/'],
+    linkOk: /^https?:\/\/[a-z0-9-]+\.folha\.uol\.com\.br\/.+\/\d{4}\/\d{2}\/[a-z0-9-]{15,}\.shtml$/i,
   },
   {
     id: 'estadao', nome: 'Estadão', dominio: 'estadao.com.br',
@@ -85,6 +122,8 @@ const FONTES = [
       'https://www.estadao.com.br/arc/outboundfeeds/feeds/rss/sections/e-investidor/',
       'https://einvestidor.estadao.com.br/feed/',
     ],
+    htmlSempre: ['https://www.estadao.com.br/economia/negocios/', 'https://www.estadao.com.br/economia/'],
+    linkOk: /^https?:\/\/www\.estadao\.com\.br\/(economia|sao-paulo|e-investidor|einvestidor)\/([a-z0-9-]+\/)?[a-z0-9-]{25,}\/?$/i,
   },
   {
     id: 'valor', nome: 'Valor Econômico', dominio: 'valor.globo.com',
@@ -94,6 +133,8 @@ const FONTES = [
       'https://pox.globo.com/rss/valor/empresas/',
       'https://pox.globo.com/rss/valor/financas/',
     ],
+    htmlSempre: ['https://valor.globo.com/empresas/', 'https://valor.globo.com/financas/'],
+    linkOk: /^https?:\/\/valor\.globo\.com\/.+\/noticia\/\d{4}\/\d{2}\/\d{2}\/[a-z0-9-]{15,}\.ghtml$/i,
   },
   {
     id: 'oglobo', nome: 'O Globo', dominio: 'oglobo.globo.com',
@@ -103,13 +144,18 @@ const FONTES = [
       'https://pox.globo.com/rss/oglobo/economia/',
       'https://pox.globo.com/rss/oglobo/rio/',
     ],
+    htmlSempre: ['https://oglobo.globo.com/blogs/capital/', 'https://oglobo.globo.com/economia/'],
+    linkOk: /^https?:\/\/oglobo\.globo\.com\/.+\/(noticia|post)\/\d{4}\/\d{2}\/(\d{2}\/)?[a-z0-9-]{15,}\.ghtml$/i,
   },
 ];
 
 // Busca de reforço no Google Notícias (pega o que os RSS gerais deixam passar).
 // Os links do Google são de redirecionamento; só entram se o jornal não
 // trouxer a mesma manchete com o link original.
-const BUSCA_GOOGLE = '(imóveis OR imobiliário OR FGTS OR construtora OR incorporadora OR shopping OR galpões OR "fundo imobiliário")';
+// Conteúdo patrocinado (Dino, Pressworks, Estúdio Folha…) nunca entra no clipping.
+const PATROCINADO = /\/patrocinado\/|\/conteudo-de-marca\/|\/\/estudio\.folha\.|\/publicidade\/|\/especial-publicitario\//i;
+
+const BUSCA_GOOGLE = '(imóveis OR imobiliário OR imobiliária OR FGTS OR "Minha Casa" OR construtora OR incorporadora OR incorporadoras OR shopping OR shoppings OR galpões OR escritórios OR "fundo imobiliário" OR lançamentos OR aluguel)';
 
 // ----------------------------------------------------------------- utilidades
 
@@ -140,8 +186,8 @@ function tag(bloco, nome) {
   return m ? m[1] : '';
 }
 
-function ehDoSetor(titulo, resumo) {
-  return RE_PALAVRAS.test(semAcento(titulo + ' ' + (resumo || '')));
+function ehDoSetor(titulo) {
+  return pontua(titulo) >= TALVEZ;
 }
 
 // Decide só pela manchete: o resumo dos jornais traz assunto demais e puxava
@@ -150,6 +196,7 @@ function categoria(titulo, url) {
   const t = semAcento(titulo);
   if (/metroquadrado\.com\/comercial\//.test(url)) return 'malls';
   if (/metroquadrado\.com\/(residencial|cidades)\//.test(url)) return 'homebuilders';
+  if (RE_HOMEBUILDERS.test(t)) return 'homebuilders';
   if (/siila\.com\.br/.test(url)) return RE_MALLS.test(t) || !/residenc|incorpora|construtora|imovel|imoveis/.test(t) ? 'malls' : 'homebuilders';
   return RE_MALLS.test(t) ? 'malls' : 'homebuilders';
 }
@@ -158,6 +205,18 @@ function data(s) {
   if (!s) return null;
   const d = new Date(decodeEntities(s).trim());
   return isNaN(d) ? null : d.toISOString();
+}
+
+// /2026/11/04/ no endereço (Globo) vira a data; /2026/11/ (Folha) só se for de outro mês.
+function dataNaUrl(url) {
+  const m = String(url).match(/\/(20\d\d)\/(\d\d)\/(\d\d)\//);
+  if (m) return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], 12)).toISOString();
+  const mes = String(url).match(/\/(20\d\d)\/(\d\d)\//);
+  if (mes) {
+    const agora = new Date();
+    if (+mes[1] !== agora.getUTCFullYear() || +mes[2] !== agora.getUTCMonth() + 1) return new Date(Date.UTC(+mes[1], +mes[2], 0, 23)).toISOString(); // fim daquele mês
+  }
+  return null;
 }
 
 function urlLimpa(u) {
@@ -314,6 +373,12 @@ async function coletaFonte(f, dias) {
     if (h.itens.length) { relatorio.via.push('html'); itens.push(...h.itens); }
   }
 
+  if (f.htmlSempre) {
+    const h = await tentar(f.htmlSempre, (html, u) => lerHtml(html, u, f.linkOk));
+    relatorio.erros.push(...h.erros);
+    if (h.itens.length) { relatorio.via.push('páginas'); itens.push(...h.itens); }
+  }
+
   // Reforço do Google Notícias (sempre, pra cobrir o que o RSS geral não traz).
   const q = 'site:' + f.dominio + ' ' + (f.especializado ? '' : BUSCA_GOOGLE + ' ') + 'when:' + dias + 'd';
   const g = await tentar(['https://news.google.com/rss/search?q=' + encodeURIComponent(q) + '&hl=pt-BR&gl=BR&ceid=BR:pt-419'], xml => lerFeed(xml));
@@ -333,8 +398,11 @@ async function coletaFonte(f, dias) {
   const final = [];
   for (const i of itens) {
     if (!i.viaGoogle && !i.url.includes(f.dominio.replace(/^www\./, ''))) continue;
+    if (!i.data) i.data = dataNaUrl(i.url);
+    if (PATROCINADO.test(i.url)) continue;
     if (i.data && Date.parse(i.data) < limite) continue;
-    if (!f.especializado && !ehDoSetor(i.titulo, i.resumo)) continue;
+    const pontos = pontua(i.titulo);
+    if (!f.especializado && pontos < TALVEZ) continue;
     final.push({
       fonte: f.id,
       fonteNome: f.nome,
@@ -345,6 +413,8 @@ async function coletaFonte(f, dias) {
       tituloDoLink: !!i.tituloDoLink,
       ordem: f.ordem ? f.ordem(i.url) : 0,
       categoria: categoria(i.titulo, i.url),
+      // 0–9: quanto a manchete parece do setor. Especializados nunca ficam abaixo de RELEVANTE.
+      pontos: f.especializado ? Math.max(pontos, RELEVANTE) : pontos,
     });
   }
   relatorio.total = final.length;
@@ -444,7 +514,7 @@ async function coletaTudo(dias) {
   FONTES.forEach((f, k) => { fontes[f.id] = resultados[k].relatorio; itens.push(...resultados[k].itens); });
   itens = deduplica(itens);
   await desembrulhaGoogle(itens);
-  itens = deduplica(itens);
+  itens = deduplica(itens.filter(i => !PATROCINADO.test(i.url)));
   itens.sort((a, b) => {
     const da = a.data ? Date.parse(a.data) : 0, db = b.data ? Date.parse(b.data) : 0;
     if (da !== db) return db - da;
@@ -469,4 +539,4 @@ async function handler(req, res) {
 }
 
 module.exports = handler;
-module.exports._interno = { urlLimpa, urlNoId, idGoogle, lerFeed, lerSitemap, lerHtml, lerUrlsSoltas, ehDoSetor, categoria, deduplica, FONTES };
+module.exports._interno = { urlLimpa, urlNoId, idGoogle, lerFeed, lerSitemap, lerHtml, lerUrlsSoltas, ehDoSetor, pontua, categoria, dataNaUrl, deduplica, FONTES };
