@@ -24,7 +24,7 @@ Repositório e projeto na Vercel próprios, sem nada do Diagonal.
 - O que é do setor: `TERMOS` (pontos por termo, montados a partir de ~1.100
   notícias que já saíram no clipping). O que vai para MALLS & PROPERTIES:
   `RE_MALLS`; incorporadoras sempre em HOMEBUILDERS: `RE_HOMEBUILDERS`.
-- Patrocinados (Dino, Pressworks, Estúdio Folha…) nunca entram: `PATROCINADO`.
+- Patrocinados (Dino, Pressworks, Estúdio Folha…) entram com a etiqueta “Patrocinado”: `PATROCINADO`.
 - Na tela, a lista padrão é “Novas desde o último clipping”; as de pontuação
   baixa ficam em “+ N menos prováveis”. O app aprende com cada envio: palavras
   das notícias escolhidas sobem, das que ficaram de fora descem.

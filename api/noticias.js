@@ -133,7 +133,15 @@ const FONTES = [
       'https://pox.globo.com/rss/valor/empresas/',
       'https://pox.globo.com/rss/valor/financas/',
     ],
-    htmlSempre: ['https://valor.globo.com/empresas/', 'https://valor.globo.com/financas/'],
+    // Os patrocinados (Dino, Imóveis de Valor, Pressworks, Pulse) não saem no RSS.
+    htmlSempre: [
+      'https://valor.globo.com/empresas/',
+      'https://valor.globo.com/financas/',
+      'https://valor.globo.com/patrocinado/dino/',
+      'https://valor.globo.com/patrocinado/imoveis-de-valor/',
+      'https://valor.globo.com/patrocinado/pressworks/',
+      'https://valor.globo.com/patrocinado/pulse-brand/',
+    ],
     linkOk: /^https?:\/\/valor\.globo\.com\/.+\/noticia\/\d{4}\/\d{2}\/\d{2}\/[a-z0-9-]{15,}\.ghtml$/i,
   },
   {
@@ -144,7 +152,7 @@ const FONTES = [
       'https://pox.globo.com/rss/oglobo/economia/',
       'https://pox.globo.com/rss/oglobo/rio/',
     ],
-    htmlSempre: ['https://oglobo.globo.com/blogs/capital/', 'https://oglobo.globo.com/economia/'],
+    htmlSempre: ['https://oglobo.globo.com/blogs/capital/', 'https://oglobo.globo.com/economia/', 'https://oglobo.globo.com/patrocinado/dino/'],
     linkOk: /^https?:\/\/oglobo\.globo\.com\/.+\/(noticia|post)\/\d{4}\/\d{2}\/(\d{2}\/)?[a-z0-9-]{15,}\.ghtml$/i,
   },
 ];
@@ -152,7 +160,7 @@ const FONTES = [
 // Busca de reforço no Google Notícias (pega o que os RSS gerais deixam passar).
 // Os links do Google são de redirecionamento; só entram se o jornal não
 // trouxer a mesma manchete com o link original.
-// Conteúdo patrocinado (Dino, Pressworks, Estúdio Folha…) nunca entra no clipping.
+// Conteúdo patrocinado (Dino, Pressworks, Estúdio Folha…): entra, mas marcado.
 const PATROCINADO = /\/patrocinado\/|\/conteudo-de-marca\/|\/\/estudio\.folha\.|\/publicidade\/|\/especial-publicitario\//i;
 
 const BUSCA_GOOGLE = '(imóveis OR imobiliário OR imobiliária OR FGTS OR "Minha Casa" OR construtora OR incorporadora OR incorporadoras OR shopping OR shoppings OR galpões OR escritórios OR "fundo imobiliário" OR lançamentos OR aluguel)';
@@ -399,7 +407,6 @@ async function coletaFonte(f, dias) {
   for (const i of itens) {
     if (!i.viaGoogle && !i.url.includes(f.dominio.replace(/^www\./, ''))) continue;
     if (!i.data) i.data = dataNaUrl(i.url);
-    if (PATROCINADO.test(i.url)) continue;
     if (i.data && Date.parse(i.data) < limite) continue;
     const pontos = pontua(i.titulo);
     if (!f.especializado && pontos < TALVEZ) continue;
@@ -514,7 +521,8 @@ async function coletaTudo(dias) {
   FONTES.forEach((f, k) => { fontes[f.id] = resultados[k].relatorio; itens.push(...resultados[k].itens); });
   itens = deduplica(itens);
   await desembrulhaGoogle(itens);
-  itens = deduplica(itens.filter(i => !PATROCINADO.test(i.url)));
+  itens = deduplica(itens);
+  itens.forEach(i => { i.patrocinado = PATROCINADO.test(i.url); });
   itens.sort((a, b) => {
     const da = a.data ? Date.parse(a.data) : 0, db = b.data ? Date.parse(b.data) : 0;
     if (da !== db) return db - da;
