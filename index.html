@@ -157,6 +157,22 @@
   </div>
 </div>
 
+<!-- Colar clippings que outra pessoa mandou -->
+<div class="folha" id="folhaImportar">
+  <div class="painel">
+    <div class="alca"></div>
+    <h3><span>Clippings anteriores</span><button class="btn-icone" data-fecha>✕</button></h3>
+    <p class="dobra">Cole aqui o texto de um ou mais clippings que foram para o grupo (pode ser o da Juliana).
+      As notícias dele ficam marcadas como enviadas, a lista de “Novas” passa a contar a partir dele
+      e o app aprende com as escolhas.</p>
+    <label class="campo"><span>Texto do clipping</span><textarea id="impTexto" spellcheck="false" placeholder="*Itaú BBA | Real Estate - Daily News (05/Nov)*&#10;…"></textarea></label>
+    <p class="dobra" id="impResultado"></p>
+    <div class="botoes">
+      <button class="primario" id="btnImportarOk">Adicionar</button>
+    </div>
+  </div>
+</div>
+
 <!-- Adicionar / editar notícia -->
 <div class="folha" id="folhaItem">
   <div class="painel">
@@ -193,11 +209,12 @@
     try { return JSON.parse(localStorage.getItem(CHAVE)) || {}; } catch { return {}; }
   }
   const mem = Object.assign({ selecao: [], dia: hoje(), manuais: [], edicoes: {}, enviadas: {}, mes: 'pt', ocultas: {},
-    visto: {}, ultimoEnvio: 0, pos: {}, neg: {}, licao: null }, carrega());
+    visto: {}, ultimoEnvio: 0, pos: {}, neg: {}, licao: null, enviadasTit: {}, importados: {}, envioImportado: false }, carrega());
   // Virou o dia: a seleção começa do zero (as enviadas ficam marcadas por 10 dias).
   if (mem.dia !== hoje()) { mem.selecao = []; mem.dia = hoje(); mem.relTitulo = ''; mem.relLink = ''; }
   const limiteEnviadas = Date.now() - 10 * 864e5;
   for (const [u, t] of Object.entries(mem.enviadas)) if (t < limiteEnviadas) delete mem.enviadas[u];
+  for (const [k, t] of Object.entries(mem.enviadasTit)) if (t < limiteEnviadas) delete mem.enviadasTit[k];
   for (const [id, t] of Object.entries(mem.visto)) if (t < limiteEnviadas) delete mem.visto[id];
   function salva() { try { localStorage.setItem(CHAVE, JSON.stringify(mem)); } catch {} }
 
@@ -259,6 +276,14 @@
     return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) + ' ' + h;
   }
 
+  function diaCurto(ts) {
+    const d = new Date(ts).toLocaleDateString('sv-SE');
+    if (d === hoje()) return 'hoje';
+    const ontem = new Date(); ontem.setDate(ontem.getDate() - 1);
+    if (d === ontem.toLocaleDateString('sv-SE')) return 'ontem';
+    return new Date(ts).toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' }).replace('.', '');
+  }
+
   function esc(s) { return String(s || '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
   function desenhaChips(lista) {
@@ -291,22 +316,35 @@
   }
   const nota = n => (n.manual ? 9 : (n.pontos ?? RELEVANTE)) + bonus(n);
   const quandoChegou = n => (n.data ? Date.parse(n.data) : mem.visto[n.id] || Date.now());
+  // Mesmo link escrito de jeitos diferentes (www1, barra no fim, ?utm…) = mesma notícia.
+  const linkChave = u => String(u || '').toLowerCase().replace(/^https?:\/\/(www\d?\.)?/, '').replace(/[?#].*$/, '').replace(/\/+$/, '');
+  const tituloChave = t => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const enviadaEm = n => mem.enviadas[n.url] || mem.enviadas[linkChave(n.url)] || mem.enviadasTit[tituloChave(n.titulo)] || 0;
+  function marcaEnviada(n, quando) {
+    mem.enviadas[n.url] = quando;
+    mem.enviadas[linkChave(n.url)] = quando;
+    mem.enviadasTit[tituloChave(n.titulo)] = quando;
+  }
+
   function ehNova(n) {
-    if (mem.enviadas[n.url]) return false;
+    if (enviadaEm(n)) return false;
     if (!mem.ultimoEnvio) return quandoChegou(n) >= Date.now() - 30 * 3600e3;
     // Já estava na lista quando ela mandou o último clipping = ela deixou passar.
     if ((mem.visto[n.id] || 0) <= mem.ultimoEnvio) return false;
+    // Último clipping foi colado (mandado por outra pessoa): o que saiu antes dele
+    // estava disponível pra quem montou e ficou de fora.
+    if (mem.envioImportado && n.data && Date.parse(n.data) <= mem.ultimoEnvio - 2 * 3600e3) return false;
     // Apareceu depois do envio: entra se for das últimas 24h antes dele (atrasadas contam).
     return quandoChegou(n) >= mem.ultimoEnvio - 24 * 3600e3;
   }
 
   // Ao mandar o clipping: o que foi escolhido ensina "sim", o resto da lista de novas
   // ensina "não". Se mandar de novo no mesmo dia, desfaz a lição anterior antes.
+  const soma = (alvo, lista, sinal) => lista.forEach(t => palavras(t).forEach(w => {
+    alvo[w] = (alvo[w] || 0) + sinal;
+    if (alvo[w] <= 0) delete alvo[w];
+  }));
   function aprende(escolhidas, candidatas) {
-    const soma = (alvo, lista, sinal) => lista.forEach(t => palavras(t).forEach(w => {
-      alvo[w] = (alvo[w] || 0) + sinal;
-      if (alvo[w] <= 0) delete alvo[w];
-    }));
     if (mem.licao && mem.licao.dia === hoje()) { soma(mem.pos, mem.licao.sim, -1); soma(mem.neg, mem.licao.nao, -1); }
     const sim = escolhidas.map(n => n.titulo);
     const ids = new Set(escolhidas.map(n => n.id));
@@ -317,7 +355,7 @@
 
   function cartao(n) {
     const sel = mem.selecao.includes(n.id);
-    const usada = !!mem.enviadas[n.url];
+    const usada = enviadaEm(n);
     return `<div class="item${sel ? ' sel' : ''}${usada ? ' usada' : ''}" data-id="${esc(n.id)}">
       <div class="check" data-acao="marcar"></div>
       <div class="corpo" data-acao="marcar">
@@ -328,7 +366,7 @@
           ${n.patrocinado ? '<span class="tag patro">Patrocinado</span>' : ''}
           ${n.data ? `<span>· ${quando(n.data)}</span>` : ''}
           ${/news\.google\./.test(n.url) ? '<span style="color:var(--accent)">· ⚠ link Google, troque no ✎</span>' : ''}
-          ${usada ? '<span>· já enviada</span>' : ''}
+          ${usada ? `<span>· enviada ${diaCurto(usada)}</span>` : ''}
         </div>
       </div>
       <div class="acoes">
@@ -364,6 +402,7 @@
       }
     }
     html += `<button class="add" id="btnAdd">+ Adicionar notícia com link</button>`;
+    html += `<button class="add" id="btnImportar">+ Adicionar clippings anteriores (de quem mandou no grupo)</button>`;
 
     const falhas = Object.entries(fontes).filter(([, f]) => !f.total);
     if (falhas.length && !carregando) {
@@ -431,10 +470,11 @@
     const agora = Date.now();
     const sel = selecionadas();
     // Lição só uma vez por envio (Copiar e WhatsApp contam como o mesmo envio).
-    const candidatas = todos().filter(n => ehNova(n) || mem.enviadas[n.url] === mem.ultimoEnvio);
+    const candidatas = todos().filter(n => ehNova(n) || enviadaEm(n) === mem.ultimoEnvio);
     if (!mem.licao || mem.licao.dia !== hoje() || mem.ultimoEnvio < agora - 10 * 60e3) aprende(sel, candidatas);
-    sel.forEach(n => { mem.enviadas[n.url] = agora; });
+    sel.forEach(n => marcaEnviada(n, agora));
     mem.ultimoEnvio = agora;
+    mem.envioImportado = false;
     salva();
   }
 
@@ -468,6 +508,7 @@
       fecha(e.target.closest('.folha')); return;
     }
     if (e.target.id === 'btnAdd') { abreEdicao(null); return; }
+    if (e.target.id === 'btnImportar') { $('impTexto').value = ''; $('impResultado').textContent = ''; abre('folhaImportar'); return; }
 
     const ord = e.target.closest('[data-ord]');
     if (ord) {
@@ -579,6 +620,88 @@
     toast('Copiado! É só colar no WhatsApp');
   });
   $('btnWhats').addEventListener('click', marcaEnviadas);
+
+  // ---------------------------------------------------------------- clippings colados
+  // Lê o texto do WhatsApp: cabeçalho "Daily News (05/Nov)", manchetes entre *…* e
+  // "Link: …". Aceita vários de uma vez e também a conversa exportada ([05/11/26, 08:42:27] …).
+  const MES_NUM = { jan: 0, fev: 1, feb: 1, mar: 2, abr: 3, apr: 3, mai: 4, may: 4, jun: 5, jul: 6, ago: 7, aug: 7, set: 8, sep: 8, out: 9, oct: 9, nov: 10, dez: 11, dec: 11 };
+  function lerClippings(texto) {
+    const blocos = String(texto).replace(/\u200e/g, '').split(/(?=^.*Daily News)/m).filter(b => /Daily News/.test(b) || /Link:/i.test(b));
+    const out = [];
+    for (const b of blocos) {
+      const linhas = b.split('\n');
+      let quando = null;
+      const zap = linhas[0].match(/\[(\d\d)\/(\d\d)\/(\d\d),\s*(\d\d):(\d\d)/);
+      if (zap) quando = new Date(2000 + +zap[3], +zap[2] - 1, +zap[1], +zap[4], +zap[5]).getTime();
+      const cab = b.match(/Daily News\s*\((\d{1,2})\/([A-Za-zç]{3})/);
+      if (!quando && cab && MES_NUM[cab[2].toLowerCase()] !== undefined) {
+        const agora = new Date();
+        let d = new Date(agora.getFullYear(), MES_NUM[cab[2].toLowerCase()], +cab[1], 8, 45);
+        if (d - agora > 2 * 864e5) d = new Date(agora.getFullYear() - 1, d.getMonth(), d.getDate(), 8, 45);
+        quando = d.getTime();
+      }
+      const noticias = [];
+      let secao = null, titulo = null;
+      for (const l of linhas) {
+        const t = l.replace(/^\[[^\]]*\][^:]*:\s*/, '').trim();
+        const link = t.match(/^link:\s*(\S+)/i);
+        if (link) {
+          if (titulo && !/itau\.com\.br/.test(link[1])) noticias.push({ titulo, url: link[1], secao });
+          titulo = null;
+          continue;
+        }
+        const limpo = t.replace(/^[*_\s]+|[*_\s]+$/g, '');
+        if (!limpo || /Daily News|Últimas Notícias|Real Estate Team/i.test(limpo)) continue;
+        if (/^\*/.test(t) && limpo === limpo.toUpperCase() && limpo.length < 40) {
+          secao = /MALL|PROPERT|COMERCIAL/.test(limpo) ? 'malls' : 'homebuilders';
+          titulo = null;
+        } else if (/^\*/.test(t)) titulo = limpo;
+      }
+      if (noticias.length) out.push({ quando: quando || Date.now(), noticias });
+    }
+    return out;
+  }
+
+  $('btnImportarOk').addEventListener('click', () => {
+    const clips = lerClippings($('impTexto').value);
+    if (!clips.length) { $('impResultado').textContent = 'Não achei notícias nesse texto. Precisa ter as manchetes e as linhas “Link: …”.'; return; }
+    const lista = todos();
+    const porLink = new Map(lista.map(n => [linkChave(n.url), n]));
+    const porTitulo = new Map(lista.map(n => [tituloChave(n.titulo), n]));
+    let total = 0, naLista = 0, novos = 0;
+    for (const c of clips.sort((a, b) => a.quando - b.quando)) {
+      const marca = c.noticias.map(x => linkChave(x.url)).sort().join('|');
+      const jaAprendeu = mem.importados[marca];
+      const achadas = [];
+      for (const x of c.noticias) {
+        total++;
+        marcaEnviada(x, c.quando);
+        const n = porLink.get(linkChave(x.url)) || porTitulo.get(tituloChave(x.titulo));
+        if (n) {
+          naLista++;
+          achadas.push(n.id);
+          marcaEnviada(n, c.quando);
+          // A seção que quem montou escolheu vale pra essa notícia.
+          if (n.categoria !== x.secao && !n.manual) mem.edicoes[n.id] = Object.assign({}, mem.edicoes[n.id], { categoria: x.secao });
+        }
+      }
+      if (!jaAprendeu) {
+        novos++;
+        // Sim: as manchetes do clipping. Não: o que já tinha saído e ficou de fora.
+        const nao = lista.filter(n => !achadas.includes(n.id) && !n.manual && !enviadaEm(n)
+          && quandoChegou(n) <= c.quando && quandoChegou(n) >= c.quando - 30 * 3600e3).map(n => n.titulo);
+        soma(mem.pos, c.noticias.map(x => x.titulo), 1);
+        soma(mem.neg, nao, 1);
+        mem.importados[marca] = c.quando;
+      }
+      if (c.quando > mem.ultimoEnvio) { mem.ultimoEnvio = c.quando; mem.envioImportado = true; }
+    }
+    mem.selecao = mem.selecao.filter(id => { const n = porId(id); return n && !enviadaEm(n); });
+    salva();
+    $('impResultado').textContent = `${clips.length} clipping${clips.length > 1 ? 's' : ''} lido${clips.length > 1 ? 's' : ''}, ${total} notícias (${naLista} estavam na lista e ficaram marcadas como enviadas).`
+      + (novos < clips.length ? ' Alguns já tinham sido adicionados antes; não contaram de novo.' : '');
+    toast('Clipping adicionado');
+  });
 
   // Voltou pro app depois de um tempo: busca de novo.
   let ultimaBusca = Date.now();

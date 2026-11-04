@@ -30,3 +30,6 @@ Repositório e projeto na Vercel próprios, sem nada do Diagonal.
   das notícias escolhidas sobem, das que ficaram de fora descem.
 - Na tela, “Diagnóstico das fontes” (no fim da lista) mostra quantas notícias
   vieram de cada jornal e qual endereço falhou.
+- Dias em que outra pessoa mandou: “+ Adicionar clippings anteriores” (fim da
+  lista). Cola o texto do WhatsApp; as notícias ficam “enviadas”, a lista de
+  Novas conta a partir dele, a seção escolhida vale e o app aprende com ele.
