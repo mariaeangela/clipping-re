@@ -69,6 +69,12 @@
 
   .vazio, .aviso { text-align: center; color: var(--muted); padding: 32px 12px; }
   .aviso { padding: 12px; font-size: 13px; background: var(--card); border: 1px dashed var(--line); border-radius: 12px; text-align: left; margin-top: 12px; }
+  details.ultimo { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; margin: 12px 0 4px; font-size: 13px; color: var(--muted); }
+  details.ultimo summary { cursor: pointer; list-style: none; }
+  details.ultimo summary::-webkit-details-marker { display: none; }
+  details.ultimo summary b { color: var(--ink); }
+  details.ultimo p, details.ultimo ul { margin: 8px 0 0; padding-left: 18px; }
+  #impResultado .ok { display: block; color: var(--ok); font-weight: 700; font-size: 16px; margin-bottom: 4px; }
   details.talvez { margin: 4px 0 8px; }
   details.talvez > summary { cursor: pointer; color: var(--muted); font-size: 13px; padding: 8px 4px; list-style: none; }
   details.talvez > summary::-webkit-details-marker { display: none; }
@@ -209,7 +215,7 @@
     try { return JSON.parse(localStorage.getItem(CHAVE)) || {}; } catch { return {}; }
   }
   const mem = Object.assign({ selecao: [], dia: hoje(), manuais: [], edicoes: {}, enviadas: {}, mes: 'pt', ocultas: {},
-    visto: {}, ultimoEnvio: 0, pos: {}, neg: {}, licao: null, enviadasTit: {}, importados: {}, envioImportado: false }, carrega());
+    visto: {}, ultimoEnvio: 0, pos: {}, neg: {}, licao: null, enviadasTit: {}, importados: {}, envioImportado: false, historico: [] }, carrega());
   // Virou o dia: a seleção começa do zero (as enviadas ficam marcadas por 10 dias).
   if (mem.dia !== hoje()) { mem.selecao = []; mem.dia = hoje(); mem.relTitulo = ''; mem.relLink = ''; }
   const limiteEnviadas = Date.now() - 10 * 864e5;
@@ -383,9 +389,9 @@
       (filtroFonte === 'todas' || n.fonteNome === filtroFonte) &&
       (mem.selecao.includes(n.id) || filtroExtra === 'todas' || (filtroExtra === 'novas' ? ehNova(n) : n.categoria === filtroExtra)));
 
-    let html = '';
+    let html = avisoUltimo();
     if (!vis.length) {
-      html = `<div class="vazio">${carregando ? 'Buscando…' : filtroExtra === 'novas' && lista.length
+      html += `<div class="vazio">${carregando ? 'Buscando…' : filtroExtra === 'novas' && lista.length
         ? 'Nada novo desde o último clipping. Veja em “Tudo (2 dias)”.' : 'Nenhuma notícia por aqui.'}</div>`;
     } else {
       for (const cat of Object.keys(SECOES)) {
@@ -466,6 +472,25 @@
     $('btnWhats').href = 'https://wa.me/?text=' + encodeURIComponent(t);
   }
 
+  // Últimos clippings registrados (mandados pelo app ou colados), pro aviso do topo.
+  function registra(r) {
+    mem.historico = [r, ...(mem.historico || []).filter(h => Math.abs(h.quando - r.quando) > 10 * 60e3)]
+      .sort((a, b) => b.quando - a.quando).slice(0, 7);
+  }
+  function rotuloClipping(ts) {
+    const d = new Date(ts);
+    return String(d.getDate()).padStart(2, '0') + '/' + MESES.pt[d.getMonth()];
+  }
+  function avisoUltimo() {
+    const h = mem.historico || [];
+    if (!h.length) return '';
+    const u = h[0];
+    const hora = new Date(u.quando).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    const resto = h.slice(1).map(x => `<li>${rotuloClipping(x.quando)} · ${x.colado ? 'colado' : 'mandado pelo app'} · ${x.n} notícias</li>`).join('');
+    return `<details class="ultimo"><summary>✓ Último clipping: <b>${rotuloClipping(u.quando)}</b> (${diaCurto(u.quando)}, ${hora}) · ${u.colado ? 'colado' : 'mandado pelo app'} · ${u.n} notícias</summary>`
+      + `<p>As “Novas” contam a partir dele.</p>${resto ? `<ul>${resto}</ul>` : ''}</details>`;
+  }
+
   function marcaEnviadas() {
     const agora = Date.now();
     const sel = selecionadas();
@@ -475,6 +500,7 @@
     sel.forEach(n => marcaEnviada(n, agora));
     mem.ultimoEnvio = agora;
     mem.envioImportado = false;
+    registra({ quando: agora, colado: false, n: sel.length });
     salva();
   }
 
@@ -508,7 +534,7 @@
       fecha(e.target.closest('.folha')); return;
     }
     if (e.target.id === 'btnAdd') { abreEdicao(null); return; }
-    if (e.target.id === 'btnImportar') { $('impTexto').value = ''; $('impResultado').textContent = ''; abre('folhaImportar'); return; }
+    if (e.target.id === 'btnImportar') { $('impTexto').value = ''; $('impResultado').textContent = ''; $('btnImportarOk').textContent = 'Adicionar'; abre('folhaImportar'); return; }
 
     const ord = e.target.closest('[data-ord]');
     if (ord) {
@@ -663,12 +689,14 @@
   }
 
   $('btnImportarOk').addEventListener('click', () => {
+    if ($('btnImportarOk').textContent === 'Fechar') { fecha($('folhaImportar')); return; }
     const clips = lerClippings($('impTexto').value);
     if (!clips.length) { $('impResultado').textContent = 'Não achei notícias nesse texto. Precisa ter as manchetes e as linhas “Link: …”.'; return; }
     const lista = todos();
     const porLink = new Map(lista.map(n => [linkChave(n.url), n]));
     const porTitulo = new Map(lista.map(n => [tituloChave(n.titulo), n]));
     let total = 0, naLista = 0, novos = 0;
+    const repetidos = [];
     for (const c of clips.sort((a, b) => a.quando - b.quando)) {
       const marca = c.noticias.map(x => linkChave(x.url)).sort().join('|');
       const jaAprendeu = mem.importados[marca];
@@ -693,14 +721,21 @@
         soma(mem.pos, c.noticias.map(x => x.titulo), 1);
         soma(mem.neg, nao, 1);
         mem.importados[marca] = c.quando;
-      }
+        registra({ quando: c.quando, colado: true, n: c.noticias.length });
+      } else repetidos.push(c);
       if (c.quando > mem.ultimoEnvio) { mem.ultimoEnvio = c.quando; mem.envioImportado = true; }
     }
     mem.selecao = mem.selecao.filter(id => { const n = porId(id); return n && !enviadaEm(n); });
     salva();
-    $('impResultado').textContent = `${clips.length} clipping${clips.length > 1 ? 's' : ''} lido${clips.length > 1 ? 's' : ''}, ${total} notícias (${naLista} estavam na lista e ficaram marcadas como enviadas).`
-      + (novos < clips.length ? ' Alguns já tinham sido adicionados antes; não contaram de novo.' : '');
-    toast('Clipping adicionado');
+    desenha();  // a lista atrás já muda na hora, sem precisar buscar de novo
+    const datas = clips.map(c => rotuloClipping(c.quando)).join(', ');
+    $('impResultado').innerHTML = (novos
+      ? `<span class="ok">✓ Adicionado: clipping de ${esc(datas)}</span>${total} notícias marcadas como enviadas`
+        + (naLista ? ` (${naLista} já estavam na sua lista)` : '') + '. A lista já foi atualizada.'
+      : `<span class="ok">✓ Esse clipping (${esc(datas)}) já estava adicionado</span>Nada mudou.`)
+      + (novos && repetidos.length ? ` ${repetidos.length} deles já estava${repetidos.length > 1 ? 'm' : ''} adicionado${repetidos.length > 1 ? 's' : ''} antes.` : '');
+    $('impTexto').value = '';
+    $('btnImportarOk').textContent = 'Fechar';
   });
 
   // Voltou pro app depois de um tempo: busca de novo.
