@@ -33,3 +33,8 @@ Repositório e projeto na Vercel próprios, sem nada do Diagonal.
 - Dias em que outra pessoa mandou: “+ Adicionar clippings anteriores” (fim da
   lista). Cola o texto do WhatsApp; as notícias ficam “enviadas”, a lista de
   Novas conta a partir dele, a seção escolhida vale e o app aprende com ele.
+- Relatórios do Itaú BBA: “+ Adicionar relatório do IBBA”. Cola o link (ou a
+  mensagem inteira). A empresa/setor sai do fim do link (MULT_… = Multiplan,
+  lista `NOMES` em `api/relatorio.js`); o título vem da mensagem colada, de um
+  clipping colado antes ou da página do portal (`/api/relatorio`), se ela
+  mostrar sem login. Vão no topo do clipping: `*Itaú BBA on X: título*`.

@@ -63,6 +63,7 @@
   .tag.homebuilders { background: var(--hb-soft); color: var(--hb); }
   .tag.malls { background: var(--mp-soft); color: var(--mp); }
   .meta a { color: var(--muted); }
+  .item.rel .corpo { cursor: pointer; }
   .tag.patro { background: var(--accent-soft); color: var(--accent); }
   .acoes { display: flex; flex-direction: column; gap: 6px; }
   .acoes button, .acoes a { border: 0; background: none; padding: 4px; font-size: 16px; color: var(--muted); text-decoration: none; line-height: 1; }
@@ -148,17 +149,30 @@
         <select id="cMes"><option value="pt">Out (português)</option><option value="en">Oct (inglês)</option></select>
       </label>
     </div>
-    <details class="dobra" id="dRelatorio">
-      <summary>+ Relatório do dia (opcional, vai antes das notícias)</summary>
-      <label class="campo"><span>Título do relatório</span><input id="cRelTitulo" placeholder="Malls & Properties: 3Q26 Preview; …"></label>
-      <label class="campo"><span>Link do relatório</span><input id="cRelLink" inputmode="url" placeholder="https://www.itau.com.br/itaubba-pt/…"></label>
-    </details>
     <div class="dobra">Ordem (toque ↑ ↓ pra mudar, ⇄ troca a seção)</div>
     <ul class="ordem" id="ordem"></ul>
     <label class="campo"><span>Texto final (dá pra editar aqui antes de copiar)</span><textarea id="cTexto" spellcheck="false"></textarea></label>
     <div class="botoes">
       <button class="primario" id="btnCopiar">Copiar</button>
       <a class="primario whats" id="btnWhats" href="#" target="_blank" rel="noopener">WhatsApp</a>
+    </div>
+  </div>
+</div>
+
+<!-- Relatório do Itaú BBA -->
+<div class="folha" id="folhaRel">
+  <div class="painel">
+    <div class="alca"></div>
+    <h3><span id="relTituloPainel">Relatório do IBBA</span><button class="btn-icone" data-fecha>✕</button></h3>
+    <label class="campo"><span>Link do relatório (ou cole a mensagem inteira, com título e link)</span>
+      <textarea id="rColar" rows="3" style="min-height:0;font:inherit;font-size:16px" inputmode="url" placeholder="https://www.itau.com.br/itaubba-pt/portal/viewer/equity/…"></textarea></label>
+    <p class="dobra" id="rStatus"></p>
+    <label class="campo"><span>Empresa ou setor</span><input id="rNome" placeholder="Multiplan, Homebuilders, Malls…"></label>
+    <label class="campo"><span>Título do relatório</span><textarea id="rTitulo" rows="3" style="min-height:0;font:inherit;font-size:16px"></textarea></label>
+    <p class="dobra">No clipping fica: <b id="rPrevia">*Itaú BBA on …: …*</b></p>
+    <div class="botoes">
+      <button class="secundario" id="btnApagarRel" hidden>Tirar</button>
+      <button class="primario" id="btnSalvarRel">Salvar</button>
     </div>
   </div>
 </div>
@@ -215,9 +229,17 @@
     try { return JSON.parse(localStorage.getItem(CHAVE)) || {}; } catch { return {}; }
   }
   const mem = Object.assign({ selecao: [], dia: hoje(), manuais: [], edicoes: {}, enviadas: {}, mes: 'pt', ocultas: {},
-    visto: {}, ultimoEnvio: 0, pos: {}, neg: {}, licao: null, enviadasTit: {}, importados: {}, envioImportado: false, historico: [] }, carrega());
+    visto: {}, ultimoEnvio: 0, pos: {}, neg: {}, licao: null, enviadasTit: {}, importados: {}, envioImportado: false, historico: [], relatorios: [], relConhecidos: {} }, carrega());
+  // Versão antiga guardava um relatório só (relTitulo/relLink).
+  if (mem.relTitulo || mem.relLink) {
+    const p = separaRel(mem.relTitulo);
+    mem.relatorios.push({ id: 'r' + Date.now().toString(36), nome: p.nome, titulo: p.titulo, url: mem.relLink || '' });
+    delete mem.relTitulo; delete mem.relLink;
+  }
+  // Relatório que já foi num clipping de outro dia sai da lista.
+  mem.relatorios = mem.relatorios.filter(r => !r.enviado || new Date(r.enviado).toLocaleDateString('sv-SE') === hoje());
   // Virou o dia: a seleção começa do zero (as enviadas ficam marcadas por 10 dias).
-  if (mem.dia !== hoje()) { mem.selecao = []; mem.dia = hoje(); mem.relTitulo = ''; mem.relLink = ''; }
+  if (mem.dia !== hoje()) { mem.selecao = []; mem.dia = hoje(); }
   const limiteEnviadas = Date.now() - 10 * 864e5;
   for (const [u, t] of Object.entries(mem.enviadas)) if (t < limiteEnviadas) delete mem.enviadas[u];
   for (const [k, t] of Object.entries(mem.enviadasTit)) if (t < limiteEnviadas) delete mem.enviadasTit[k];
@@ -390,6 +412,19 @@
       (mem.selecao.includes(n.id) || filtroExtra === 'todas' || (filtroExtra === 'novas' ? ehNova(n) : n.categoria === filtroExtra)));
 
     let html = avisoUltimo();
+    if (mem.relatorios.length) {
+      html += `<div class="secao"><h2>RELATÓRIOS IBBA</h2><div class="linha"></div><span class="n">${mem.relatorios.length}</span></div>`;
+      html += mem.relatorios.map(r => `<div class="item sel rel" data-rel="${esc(r.id)}">
+        <div class="corpo" data-acao="editarRel">
+          <div class="titulo">${esc(linhaRelatorio(r))}</div>
+          <div class="meta"><span class="tag patro">IBBA</span><span>vai no topo do clipping${r.enviado ? ' · enviado ' + diaCurto(r.enviado) : ''}</span></div>
+        </div>
+        <div class="acoes">
+          <a href="${esc(r.url)}" target="_blank" rel="noopener" aria-label="Abrir">↗</a>
+          <button data-acao="editarRel" aria-label="Editar">✎</button>
+        </div>
+      </div>`).join('');
+    }
     if (!vis.length) {
       html += `<div class="vazio">${carregando ? 'Buscando…' : filtroExtra === 'novas' && lista.length
         ? 'Nada novo desde o último clipping. Veja em “Tudo (2 dias)”.' : 'Nenhuma notícia por aqui.'}</div>`;
@@ -407,6 +442,7 @@
         }
       }
     }
+    html += `<button class="add" id="btnAddRel">+ Adicionar relatório do IBBA</button>`;
     html += `<button class="add" id="btnAdd">+ Adicionar notícia com link</button>`;
     html += `<button class="add" id="btnImportar">+ Adicionar clippings anteriores (de quem mandou no grupo)</button>`;
 
@@ -421,7 +457,7 @@
     }
     $('lista').innerHTML = html;
     $('nSel').textContent = selecionadas().length;
-    $('btnMontar').disabled = !selecionadas().length;
+    $('btnMontar').disabled = !selecionadas().length && !mem.relatorios.length;
   }
 
   // ---------------------------------------------------------------- texto
@@ -431,8 +467,7 @@
     const d = new Date(($('cData').value || hoje()) + 'T12:00:00');
     const rotulo = String(d.getDate()).padStart(2, '0') + '/' + MESES[mem.mes][d.getMonth()];
     const linhas = [`*Itaú BBA | Real Estate - Daily News (${rotulo})*`, ''];
-    const relT = semAsterisco(mem.relTitulo), relL = (mem.relLink || '').trim();
-    if (relT || relL) linhas.push(`*${relT}*`, `Link: ${relL}`, '');
+    mem.relatorios.forEach(r => linhas.push(`*${linhaRelatorio(r)}*`, `Link: ${r.url}`, ''));
     linhas.push('_Últimas Notícias_', '');
     const sel = selecionadas();
     for (const cat of Object.keys(SECOES)) {
@@ -498,6 +533,7 @@
     const candidatas = todos().filter(n => ehNova(n) || enviadaEm(n) === mem.ultimoEnvio);
     if (!mem.licao || mem.licao.dia !== hoje() || mem.ultimoEnvio < agora - 10 * 60e3) aprende(sel, candidatas);
     sel.forEach(n => marcaEnviada(n, agora));
+    mem.relatorios.forEach(r => { r.enviado = agora; });
     mem.ultimoEnvio = agora;
     mem.envioImportado = false;
     registra({ quando: agora, colado: false, n: sel.length });
@@ -534,6 +570,9 @@
       fecha(e.target.closest('.folha')); return;
     }
     if (e.target.id === 'btnAdd') { abreEdicao(null); return; }
+    if (e.target.id === 'btnAddRel') { abreRelatorio(null); return; }
+    const rel = e.target.closest('[data-rel]');
+    if (rel && !e.target.closest('a')) { abreRelatorio(rel.dataset.rel); return; }
     if (e.target.id === 'btnImportar') { $('impTexto').value = ''; $('impResultado').textContent = ''; $('btnImportarOk').textContent = 'Adicionar'; abre('folhaImportar'); return; }
 
     const ord = e.target.closest('[data-ord]');
@@ -626,16 +665,11 @@
   $('btnMontar').addEventListener('click', () => {
     $('cData').value = hoje();
     $('cMes').value = mem.mes;
-    $('cRelTitulo').value = mem.relTitulo || '';
-    $('cRelLink').value = mem.relLink || '';
-    $('dRelatorio').open = !!(mem.relTitulo || mem.relLink);
     desenhaOrdem();
     abre('folhaClip');
   });
   $('cData').addEventListener('change', atualizaTexto);
   $('cMes').addEventListener('change', () => { mem.mes = $('cMes').value; salva(); atualizaTexto(); });
-  $('cRelTitulo').addEventListener('input', () => { mem.relTitulo = $('cRelTitulo').value; salva(); atualizaTexto(); });
-  $('cRelLink').addEventListener('input', () => { mem.relLink = $('cRelLink').value; salva(); atualizaTexto(); });
   $('cTexto').addEventListener('input', () => { $('btnWhats').href = 'https://wa.me/?text=' + encodeURIComponent($('cTexto').value); });
 
   $('btnCopiar').addEventListener('click', async () => {
@@ -646,6 +680,108 @@
     toast('Copiado! É só colar no WhatsApp');
   });
   $('btnWhats').addEventListener('click', marcaEnviadas);
+
+  // ---------------------------------------------------------------- relatórios IBBA
+  // Vão no topo do clipping, antes de "_Últimas Notícias_", no formato
+  // "*Itaú BBA on Multiplan: título*" + "Link: …".
+  const NOMES_REL = {
+    HOMEBUILDERS: 'Homebuilders', MALLS: 'Malls', REAL_ESTATE: 'Real Estate', REALESTATE: 'Real Estate',
+    PROPERTIES: 'Properties', ALOS: 'Allos', CURY: 'Cury', CYRE: 'Cyrela', DIRR: 'Direcional', EVEN: 'Even',
+    EZTC: 'EZ Tec', HBOR: 'Helbor', IGTI: 'Iguatemi', LAVV: 'Lavvi', LOGG: 'Log CP', LPSB: 'LPS Brasil',
+    MDNE: 'Moura Dubeux', MELK: 'Melnick', MRVE: 'MRV', MTRE: 'Mitre', MULT: 'Multiplan', PLPL: 'Plano&Plano',
+    TEND: 'Tenda', TRIS: 'Trisul', JHSF: 'JHSF', GFSA: 'Gafisa', TCSA: 'Tecnisa', SYNE: 'SYN', BRPR: 'BR Properties',
+    HBRE: 'HBR Realty', JFEN: 'João Fortes', RDNI: 'RNI', PDGR: 'PDG', VIVR: 'Viver',
+  };
+  const RE_LINK_ITAU = /https:\/\/(?:www\.)?itau\.com\.br\/\S+/i;
+  function nomeDoLink(url) {
+    const m = String(url).match(/\/([A-Za-z&_]+?)\d?_(\d{8})(?:[/?#]|$)/);
+    if (!m) return '';
+    const cod = m[1].toUpperCase();
+    return NOMES_REL[cod] || NOMES_REL[cod.replace(/_/g, '')] || m[1].replace(/_/g, ' ');
+  }
+  // "*Itaú BBA on Multiplan: Decent 3Q…*" -> { nome, titulo }
+  function separaRel(texto) {
+    const t = String(texto || '').replace(/^[*_\s]+|[*_\s]+$/g, '').replace(/^(Itaú BBA|Itau BBA|IBBA)\s+(on|sobre)\s+/i, '').trim();
+    const m = t.match(/^([^:]{2,60}):\s*(.{5,})$/);
+    return m ? { nome: m[1].trim(), titulo: m[2].trim() } : { nome: '', titulo: t };
+  }
+  const linhaRelatorio = r => `Itaú BBA on ${semAsterisco(r.nome) || '…'}: ${semAsterisco(r.titulo) || '…'}`;
+
+  let editandoRel = null, buscaRel = 0;
+  function abreRelatorio(id) {
+    editandoRel = id;
+    const r = id ? mem.relatorios.find(x => x.id === id) : null;
+    $('relTituloPainel').textContent = r ? 'Editar relatório' : 'Relatório do IBBA';
+    $('rColar').value = r ? r.url : '';
+    $('rNome').value = r ? r.nome : '';
+    $('rTitulo').value = r ? r.titulo : '';
+    $('rStatus').textContent = '';
+    $('btnApagarRel').hidden = !r;
+    previaRel();
+    abre('folhaRel');
+    if (!r) setTimeout(() => $('rColar').focus(), 50);
+  }
+  function previaRel() { $('rPrevia').textContent = '*' + linhaRelatorio({ nome: $('rNome').value, titulo: $('rTitulo').value }) + '*'; }
+
+  async function leRelatorio() {
+    const texto = $('rColar').value;
+    const link = (texto.match(RE_LINK_ITAU) || [])[0];
+    if (!link) { $('rStatus').textContent = texto.trim() ? 'Não achei um link do itau.com.br aqui.' : ''; return; }
+    const url = link.replace(/[)*_.,;]+$/, '');
+    // 1) A mensagem colada já tem o título (linha antes do "Link:")?
+    const antes = texto.slice(0, texto.indexOf(link)).split('\n').map(l => l.trim())
+      .filter(l => l && !/^(link|report|link do relat[oó]rio|link para report)[^:]*:?\s*$/i.test(l.replace(/[*_]/g, '')));
+    const linhaTit = antes.reverse().find(l => /:/.test(l) && l.replace(/[*_]/g, '').length > 15);
+    let achou = '';
+    if (linhaTit) { const p = separaRel(linhaTit.replace(/^\[[^\]]*\][^:]*:\s*/, '')); $('rNome').value = p.nome || nomeDoLink(url); $('rTitulo').value = p.titulo; achou = 'mensagem'; }
+    // 2) Já apareceu num clipping colado antes?
+    const conhecido = mem.relConhecidos[linkChave(url)];
+    if (!achou && conhecido) { $('rNome').value = conhecido.nome; $('rTitulo').value = conhecido.titulo; achou = 'histórico'; }
+    if (!$('rNome').value) $('rNome').value = nomeDoLink(url);
+    previaRel();
+    if (achou) { $('rStatus').innerHTML = '<span style="color:var(--ok)">✓ Título encontrado' + (achou === 'histórico' ? ' (de um clipping anterior)' : '') + '.</span> Confira abaixo.'; return; }
+    // 3) Pergunta ao servidor, que tenta ler a página do portal.
+    const minha = ++buscaRel;
+    $('rStatus').textContent = 'Procurando o título na página do Itaú…';
+    try {
+      const r = await fetch('/api/relatorio?url=' + encodeURIComponent(url));
+      const j = await r.json();
+      if (minha !== buscaRel) return;
+      if (j.nome && !$('rNome').value) $('rNome').value = j.nome;
+      if (j.nome && j.via === 'pagina') $('rNome').value = j.nome;
+      if (j.titulo) {
+        $('rTitulo').value = j.titulo;
+        $('rStatus').innerHTML = '<span style="color:var(--ok)">✓ Título encontrado na página do Itaú.</span> Confira abaixo.';
+      } else {
+        $('rStatus').textContent = `Achei ${$('rNome').value ? '“' + $('rNome').value + '”' : 'o link'}, mas a página do Itaú não mostra o título sem login. Cole o título abaixo (ou cole a mensagem inteira lá em cima).`;
+      }
+    } catch {
+      if (minha === buscaRel) $('rStatus').textContent = 'Não consegui ler a página do Itaú agora. Cole o título abaixo.';
+    }
+    previaRel();
+  }
+  $('rColar').addEventListener('input', () => { clearTimeout(leRelatorio.t); leRelatorio.t = setTimeout(leRelatorio, 300); });
+  $('rNome').addEventListener('input', previaRel);
+  $('rTitulo').addEventListener('input', previaRel);
+
+  $('btnSalvarRel').addEventListener('click', () => {
+    const url = ($('rColar').value.match(RE_LINK_ITAU) || [''])[0].replace(/[)*_.,;]+$/, '');
+    const nome = $('rNome').value.trim(), titulo = $('rTitulo').value.trim().replace(/^[*_\s]+|[*_\s]+$/g, '');
+    if (!url) { toast('Cole o link do relatório'); return; }
+    if (!nome || !titulo) { toast('Falta a empresa/setor ou o título'); return; }
+    const r = editandoRel && mem.relatorios.find(x => x.id === editandoRel);
+    if (r) Object.assign(r, { url, nome, titulo });
+    else mem.relatorios.push({ id: 'r' + Date.now().toString(36), url, nome, titulo });
+    mem.relConhecidos[linkChave(url)] = { nome, titulo };
+    salva();
+    fecha($('folhaRel'));
+    toast('✓ Relatório adicionado');
+  });
+  $('btnApagarRel').addEventListener('click', () => {
+    mem.relatorios = mem.relatorios.filter(x => x.id !== editandoRel);
+    salva();
+    fecha($('folhaRel'));
+  });
 
   // ---------------------------------------------------------------- clippings colados
   // Lê o texto do WhatsApp: cabeçalho "Daily News (05/Nov)", manchetes entre *…* e
@@ -672,7 +808,10 @@
         const t = l.replace(/^\[[^\]]*\][^:]*:\s*/, '').trim();
         const link = t.match(/^link:\s*(\S+)/i);
         if (link) {
-          if (titulo && !/itau\.com\.br/.test(link[1])) noticias.push({ titulo, url: link[1], secao });
+          if (titulo && /itau\.com\.br/.test(link[1])) {
+            const p = separaRel(titulo);
+            if (p.nome) mem.relConhecidos[linkChave(link[1])] = { nome: p.nome, titulo: p.titulo };
+          } else if (titulo) noticias.push({ titulo, url: link[1], secao });
           titulo = null;
           continue;
         }
