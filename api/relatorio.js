@@ -68,8 +68,20 @@ module.exports = async function handler(req, res) {
     const timer = setTimeout(() => ctl.abort(), 8000);
     const r = await fetch(url, { signal: ctl.signal, redirect: 'follow', headers: { 'User-Agent': UA, 'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8' } });
     clearTimeout(timer);
+    const html = await r.text();
+    // ?ver=1: mostra o que o servidor recebeu do Itaú (pra descobrir onde o título fica).
+    if (req.query.ver) {
+      res.status(200).json({
+        status: r.status, urlFinal: r.url, tamanho: html.length,
+        titulos: (html.match(/<title[^>]*>[^<]*<\/title>|<meta[^>]+(og:|twitter:)[^>]+>|<h1[^>]*>[\s\S]{0,300}?<\/h1>/gi) || []).slice(0, 10),
+        enderecosApi: [...new Set(html.match(/["'](\/[^"'\s]*(api|graphql|service|json)[^"'\s]*|https?:\/\/[^"'\s]*(api|graphql|service)[^"'\s]*)["']/gi) || [])].slice(0, 30),
+        scripts: [...new Set(html.match(/<script[^>]+src=["'][^"']+["']/gi) || [])].slice(0, 20),
+        inicio: html.slice(0, 3000),
+      });
+      return;
+    }
     if (r.ok) {
-      const achado = tituloDaPagina(await r.text());
+      const achado = tituloDaPagina(html);
       if (achado) {
         const p = separa(achado);
         out.titulo = p.titulo;
