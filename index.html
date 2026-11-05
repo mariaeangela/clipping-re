@@ -170,6 +170,21 @@
     <label class="campo"><span>Empresa ou setor</span><input id="rNome" placeholder="Multiplan, Homebuilders, Malls…"></label>
     <label class="campo"><span>Título do relatório</span><textarea id="rTitulo" rows="3" style="min-height:0;font:inherit;font-size:16px"></textarea></label>
     <p class="dobra">No clipping fica: <b id="rPrevia">*Itaú BBA on …: …*</b></p>
+    <details class="dobra" id="dBotaoItau">
+      <summary>Pegar o título direto do site do Itaú (configurar uma vez)</summary>
+      <p>O site do Itaú não deixa o app ler a página sozinho. Com este botão, você abre o
+        relatório no seu navegador (logada) e toca nele: o app abre com o link e o título já preenchidos.</p>
+      <p><b>No computador:</b> arraste este botão para a barra de favoritos →
+        <a class="primario" id="lnkBotao" href="#" style="display:inline-block;padding:6px 12px;text-decoration:none">📎 Clipping</a></p>
+      <p><b>No iPhone:</b></p>
+      <ol>
+        <li>Toque em <b>Copiar código</b> aqui embaixo.</li>
+        <li>No Safari, favorite qualquer página (ícone de compartilhar → <b>Adicionar Favorito</b>), com o nome <b>📎 Clipping</b>.</li>
+        <li>Abra os Favoritos, toque em <b>Editar</b>, entre no 📎 Clipping, apague o endereço e cole o código.</li>
+        <li>Para usar: com o relatório aberto, toque na barra de endereço e escreva “📎” ou “Clipping” — o favorito aparece; toque nele.</li>
+      </ol>
+      <button class="secundario" id="btnCopiarBotao" style="width:100%">Copiar código</button>
+    </details>
     <div class="botoes">
       <button class="secundario" id="btnApagarRel" hidden>Tirar</button>
       <button class="primario" id="btnSalvarRel">Salvar</button>
@@ -882,6 +897,36 @@
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible' && Date.now() - ultimaBusca > 15 * 60e3) { ultimaBusca = Date.now(); atualiza(); }
   });
+
+  // Botão de favoritos: roda na página do relatório, no navegador dela (logada), pega o
+  // título que aparece na tela e abre o app com ?rel=<link>&t=<título>.
+  const codigoBotao = 'javascript:(()=>{const c=[...document.querySelectorAll(\'h1,h2,[class*="itle"]\')]'
+    + '.map(e=>(e.innerText||\'\').trim()).filter(t=>t.length>15&&t.length<400&&!/\\n/.test(t));'
+    + 'location.href=' + JSON.stringify(location.origin + '/?rel=') + '+encodeURIComponent(location.href)+\'&t=\'+encodeURIComponent(c[0]||document.title)})()';
+  $('lnkBotao').href = codigoBotao;
+  $('lnkBotao').addEventListener('click', e => { e.preventDefault(); toast('Arraste para a barra de favoritos'); });
+  $('btnCopiarBotao').addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(codigoBotao); toast('✓ Código copiado'); }
+    catch { prompt('Copie o código:', codigoBotao); }
+  });
+
+  // Chegou pelo botão de favoritos: abre o relatório já preenchido.
+  const params = new URLSearchParams(location.search);
+  if (params.get('rel')) {
+    const url = params.get('rel'), t = params.get('t') || '';
+    history.replaceState(null, '', location.pathname);
+    abreRelatorio(null);
+    $('rColar').value = url;
+    const p = separaRel(t);
+    // Título genérico do portal ("Itaú BBA", "Portal"…) não serve.
+    const generico = !t || /^(ita[uú]( bba)?|portal|login)\b.{0,20}$/i.test(t.trim());
+    $('rNome').value = (!generico && p.nome) || nomeDoLink(url);
+    $('rTitulo').value = generico ? '' : p.titulo;
+    $('rStatus').innerHTML = generico
+      ? 'Abri o link, mas não achei o título na página. Cole o título abaixo.'
+      : '<span style="color:var(--ok)">✓ Título pego da página do Itaú.</span> Confira abaixo.';
+    previaRel();
+  }
 
   desenha();
   atualiza();
